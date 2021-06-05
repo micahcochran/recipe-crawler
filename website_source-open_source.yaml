@@ -1,0 +1,18 @@
+---
+site:
+  url: https://bevvy.co/cocktails
+  title: Bevvy
+  license: https://creativecommons.org/licenses/by-sa/3.0/
+---
+site:
+  url: https://www.midgetmomma.com/
+  title: Midget Momma
+  license: https://creativecommons.org/licenses/by-nc-sa/3.0/
+  ---
+site:
+  url: https://www.crumbblog.com/
+  license: https://creativecommons.org/licenses/by-nc/3.0/
+  title: "Crumb: A Food Blog"
+  author: Isabell Boucher
+  author-link: http://www.sweetestkitchen.com/about/
+  fake_user_agent: yes

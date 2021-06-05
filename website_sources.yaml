@@ -1,0 +1,48 @@
+---
+site:
+  url: https://www.crumbblog.com/
+  license: https://creativecommons.org/licenses/by-nc/3.0/
+  title: "Crumb: A Food Blog"
+  author: Isabell Boucher
+  author-link: http://www.sweetestkitchen.com/about/
+  fake_user_agent: yes
+---
+site:
+  url: https://www.allrecipes.com/
+  title: AllRecipes
+  license: Proprietary
+  distribute: no
+---
+site:
+  url: https://www.foodnetwork.com/recipes
+  title: FoodNetwork
+  license: Proprietary
+  distribute: no
+---
+site: 
+  url: https://www.food.com/
+  title: Food.com
+  license: Proprietary
+  distribute: no
+---
+site:
+  url: https://www.thekitchn.com/
+  title: TheKitchn
+  license: Proprietary
+  distribute: no
+---
+site:
+  url: https://www.chowhound.com/
+  title: Chowhound
+  license: Proprietary
+  distribute: no
+---
+site:
+  url: https://bevvy.co/cocktails
+  title: Bevvy
+  license: https://creativecommons.org/licenses/by-sa/3.0/
+---
+site:
+  url: https://www.midgetmomma.com/
+  title: Midget Momma
+  license: https://creativecommons.org/licenses/by-nc-sa/3.0/
