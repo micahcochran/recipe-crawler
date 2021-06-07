@@ -14,7 +14,8 @@ site:
   distribute: no
 ---
 site:
-  url: https://www.foodnetwork.com/recipes
+  url: https://www.foodnetwork.com/
+  recipes_url: https://www.foodnetwork.com/recipes
   title: FoodNetwork
   license: Proprietary
   distribute: no

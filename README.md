@@ -11,9 +11,21 @@ Most of the options are to be implemented in later version.
 The cookbooks are output into a single JSON file that is named `cookbook.json`. If that file name already exists it will name it `cookbook-1.json` and so on.
 
 Information about the design and future improvements is [recipe-crawler.py](in the source).
- This still needs some fine tuning to improve the algorithm so that it will more quickly get the recipes and put the license inforamtion into the file.
+This still needs some fine tuning to improve the algorithm so that it will more quickly get the recipes and put the license information into the file.
 
 The code tool used for formatting is [black](https://black.readthedocs.io/).
+
+## Running
+This has to be run from the command line.  `websites_config.yaml` is a configuration file for specifying the websites to be crawled.
+### Linux/Mac
+```bash
+/some/folder/recipe-crawler$ ./recipe_crawler.py (websites_config.yaml)
+```
+
+### Windows
+```
+C:\some\folder\recipe-crawler> python recipe_crawler.py (websites_config.yaml)
+```
 
 ##  Requirements
 Python 3.6 or greater
@@ -26,12 +38,13 @@ Requirements these can be installed on the command line with
 > pip install -r requirements.txt
 ```
 
-OR Install the python libraries individually if prefered:
-* [beautifulsoup4](https://beautiful-soup-4.readthedocs.io/)
+OR Install the python libraries individually if preferred:
+* [Beautiful Soup](https://beautiful-soup-4.readthedocs.io/)
 * [loguru](https://loguru.readthedocs.io/)
+* [Pendulum](https://pendulum.eustace.io/)
+* [PyYAML](https://pyyaml.org/)
 * [requests](https://docs.python-requests.org/)
 * [scrape-schema-recipe](https://github.com/micahcochran/scrape-schema-recipe)
-* [PyYAML](https://pyyaml.org/)
 
 
 ## License

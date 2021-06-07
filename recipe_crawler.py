@@ -1,8 +1,25 @@
 #!/usr/bin/env python3
 
+#
+# Copyright 2021  Micah Cochran
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+
 ###  WHAT  ###############################################################
 # This is a web crawler to for a few recipe websites to compile a cookbook in JSON format.
-# This is intented to run pretty quickly (a few minutes), not be long lived process.
+# This is intended to run pretty quickly (a few minutes), not be long lived process.
 # Hopefully, it won't behave badly.  Logging will tell about its behavior.
 #
 # The design is simple and slow. (It is slow, it takes about 7 minutes to find 20 recipes.)
@@ -14,8 +31,19 @@
 
 ###  RELEASE  ############################################################
 #
-# 0.0.1 Released 2021-06-03
-#       Works, but still has most of the debugging enabled.
+# 0.0.2  Release 2021-06-06
+#        * Logs runtime and number of web page requests.
+#        * Add Pendulum library to print out an English runtime message.
+#        * Correct spelling errors.
+#        * Rename __VERSION__ to __version__
+#        * Add url and license to the schema output.
+#        * Add unit testing for URLTest Class.
+#        * Fixed bug in URLTest.is_same_domain(), the same domain names with different letter
+#          cases were returning false. Now, WWW.EXAMPLE.COM and www.example.com, will return
+#          True for the is_same_domain() function.
+#
+# 0.0.1  Released 2021-06-05
+#        Works, but still has most of the debugging enabled.
 #
 
 ###  DESIGN - CLASSES ####################################################
@@ -25,27 +53,29 @@
 # Crawler - handles one website.  It crawls the website, parses the schema.org/Recipe results,
 # and finds another page on the website to visit next.
 #
-# LogUponChanged - this is intened to print a log message when the variable's value has changed.
+# LogUponChanged - this is intended to print a log message when the variable's value has changed.
 #
 # URLTest - contains tests that are performed on URLs
 #
 
 # === Possible Improvements ==============================================
 #
-# * Add Runtime.
-#
-# * Add counter on the number of request.get calls made.
-#
 # * Need to have a modify the strategy for picking the next url to visit.  It needs to prioritize ones that will lead to a recipe.
 #   (url might look like https://www.example.com/recipes/pizza) Add those URLs to the queue first.
-#   Then, fall back on picking a random URL stategy.   (for version 0.1.0)
+#   Then, fall back on picking a random URL strategy.   (for version 0.1.0)
+#
+#   Current, strategy takes 7 minutes 22 seconds and downloads 122 web pages for 20 recipes.
+#   That's 6 webpages/recipe, and a recipe every 22 seconds. (Version 0.0.1.)
+#
+#   Another test yielded  4 minutes, downloaded 79 web pages for 20 recipes.
+#   That's 4 webpages/recipe, and a recipe every 12 seconds.  (Version 0.0.2.)
 #
 # * Should add a license key to the schema.org/Recipe for the Open recipes.  This should be in form of a URL
 #   that is taken from the configuration file.  (for version 0.1.0)
 #
 #  * Sitemap support could be added.  It might help some of the crawlers that exhaust all the links.
 #
-#  * I'd slightly like to have a cralwer for NIH Healthy Eating website, which has public domain recipes.
+#  * I'd slightly like to have a crawler for NIH Healthy Eating website, which has public domain recipes.
 #    There are a few problems with that idea.
 #    (1) recipe_scrapers library would need to be used because the website does not format recipes
 #        in schema.org/Recipe format.  Crawler was not really designed to be extended in that manner.
@@ -61,6 +91,7 @@
 #
 #        recipe_scraper issue #170:  https://github.com/hhursev/recipe-scrapers/issues/170
 #
+#  * Using deque is not being used appropriately.  Probably should be replaced with a list.
 
 # ----- Python native imports -----
 import copy
@@ -81,6 +112,7 @@ import urllib.parse
 # ----- external imports -----
 from bs4 import BeautifulSoup
 from loguru import logger
+import pendulum
 
 # import recipe_scrapers
 import requests
@@ -91,9 +123,9 @@ import yaml
 # isn't performing correctly.
 SLOW_DEBUG = True
 
+__version__ = "0.0.2"
 # This is the user-agent
-__VERSION__ = "0.0.1"
-USER_AGENT = f"crawl-recipes.py/{__VERSION__}"
+USER_AGENT = f"crawl-recipes.py/{__version__}"
 REQUESTS_HEADERS = {"user-agent": USER_AGENT}
 
 # This is unused
@@ -118,7 +150,7 @@ class LogUponChanged:
 ######  class MultiCrawler  ##############################################
 class MultiCrawler:
     """
-    The class manges multiple crawlers.  It will sequantially run these crawlers on different website
+    The class manges multiple crawlers.  It will sequentially run these crawlers on different website
     until those crawlers have collectively  met/exceeded the recipe_limit number of recipes.
     """
 
@@ -130,8 +162,8 @@ class MultiCrawler:
         # This is for crawlers that get removed.
         self.inactive_crawler: List = []
 
-    def add_crawler(self, url):
-        self.crawlers.append(Crawler(url))
+    def add_crawler(self, url: str, license=None):
+        self.crawlers.append(Crawler(url, license))
 
         # create an iterator that will cycle through the crawlers
         self.crawler_iter = cycle(self.crawlers)
@@ -184,13 +216,17 @@ class MultiCrawler:
 
         return ret
 
+    def results_num_get_calls(self) -> int:
+        return sum([c.num_get_calls for c in self.crawlers])
+
 
 ##### class Crawler ######################################################
 # Provide a url and it will crawl the website scraping Schema.org/Recipe patterns.  It also finds another page to crawl.
 class Crawler:
     """This crawls for one website."""
 
-    def __init__(self, url):
+    def __init__(self, url: str, license=None):
+        # this is a double ended queue, but we are just using it as a single ended one.
         self._url_queue = deque()
         self.base_url = url
         self._url_queue.append(url)
@@ -201,8 +237,15 @@ class Crawler:
         self.recipe_json: List = []
         # stores the HTML content
         self.html_pages: List = []
-        # list of urls already visted, so as to not visit again
+        # list of urls already visited, so as to not visit again
         self.been_there_urls: List = []
+        # store the number of requests.get() calls made
+        self.num_get_calls = 0
+
+        self._license = None
+        if license and license.lower() != "proprietary":
+            if URLTest().is_absolute_url(license):
+                self._license = license
 
         robots_txt_url = urllib.parse.urljoin(url, "robots.txt")
         self.robotparse = urllib.robotparser.RobotFileParser(robots_txt_url)
@@ -215,7 +258,7 @@ class Crawler:
         num_recipes = 0
 
         response = self._download_page()
-        scrapings = self._scrape_page(response.text)
+        scrapings = self._scrape_page(response)
 
         if scrapings is not None:
             if isinstance(scrapings, dict):
@@ -239,15 +282,26 @@ class Crawler:
         self.been_there_urls.append(url)
         logger.debug(f"Visiting {url}")
 
+        self.num_get_calls += 1
         return requests.get(url, headers=REQUESTS_HEADERS)
 
-    def _scrape_page(self, html):
+    def _scrape_page(self, response: requests.Response):
         """
+        scrapes a page
+        input: response is a requests.Response object from requests.get()
+
         return dict or List, if it is empty it will be None
         """
-        recipe = scrape_schema_recipe.loads(html)
+        recipe = scrape_schema_recipe.loads(response.text)
         if len(recipe) > 0:
             if len(recipe) == 1:
+                # if the schema output doesn't already have the url/license, add those to the output
+
+                if recipe[0].get("url") is None:
+                    recipe[0]["url"] = response.url
+
+                if self._license is not None and recipe[0].get("license") is None:
+                    recipe[0]["license"] = self._license
                 return recipe[0]
             else:
                 return recipe
@@ -338,22 +392,28 @@ def load_website_sources_list(
 class URLTest:
     """Class of tests for URLs"""
 
-    def __init__(self, baseurl: str):
+    def __init__(self, baseurl: str = None):
         """baseurl is the start URL of the website"""
         self.baseurl = baseurl
-        self.basesplit = urllib.parse.urlsplit(self.baseurl)
+        self.basesplit = None
+
+        if baseurl:
+            self.basesplit = urllib.parse.urlsplit(baseurl)
 
     def is_absolute_url(self, url: str) -> bool:
         """Simplistic test if this is a URL
         returns True if it is an absolute URL, False if not"""
 
-        return url.startswith("http://") or url.startswith("https://")
+        return url.startswith(("http://", "https://"))
 
     def is_same_domain(self, url: str) -> bool:
         """Tests if url is in the same domain as the base_url"""
+        if self.basesplit is None:
+            raise ValueError("self.basesplit is None, cannot run is_same_domain()")
+
         urlspl = urllib.parse.urlsplit(url)
 
-        return self.basesplit.netloc == urlspl.netloc
+        return self.basesplit.netloc.lower() == urlspl.netloc.lower()
 
 
 ##########  MAIN  #########################################################
@@ -371,13 +431,14 @@ if __name__ == "__main__":
         # use default name for configuration
         website_sources_list = load_website_sources_list()
 
+    start_time = pendulum.now()
     #   NOTE: Get 20 recipes for testing.
     mc = MultiCrawler(20)
     for source in website_sources_list:
         # logger.debug('KEYS: {}'.format(source['site'].keys()))
 
         logger.debug(f"Adding crawler for: {source['site']['url']}")
-        mc.add_crawler(source["site"]["url"])
+        mc.add_crawler(source["site"]["url"], source["site"].get("license"))
 
     mc.run()
 
@@ -394,4 +455,8 @@ if __name__ == "__main__":
     with open(filename, "w") as fp:
         json.dump(recipes_dict, fp)
 
-    logger.debug(f"Wrote '{filename}'.")
+    logger.info(f"Wrote file '{filename}'.")
+
+    logger.info(f"Number of web pages downloaded: {mc.results_num_get_calls()}")
+    runtime_str = pendulum.now().diff(start_time).in_words()
+    logger.info(f"Program's Runtime: {runtime_str}")
