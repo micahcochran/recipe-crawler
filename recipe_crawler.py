@@ -19,18 +19,30 @@
 
 ###  WHAT  ###############################################################
 # This is a web crawler to for a few recipe websites to compile a cookbook in JSON format.
-# This is intended to run pretty quickly (a few minutes), not be long lived process.
-# Hopefully, it won't behave badly.  Logging will tell about its behavior.
+# This is intended to run fairly quickly (a few minutes), not be a long lived process.
 #
-# The design is simple and slow. (It is slow, it takes about 7 minutes to find 20 recipes.)
+# The design is intended to be simple.
 
 ###  PURPOSE  ############################################################
 #
-# The purpose of this code is to crawl web site, copy recipes, and create a cookbook that can be
-# distributed because it is made up of recipes that have licenses that are open or public domain.
+# The purpose of this code is to crawl web site, copy recipes, and create a cookbook.
+# That cookbook can be used to test recipe software.  If open source/public domain recipes
+# are used, that cookbook could be distributed.
 
 ###  RELEASE  ############################################################
 #
+# 0.1.0  Release 2021-06-09
+#        Note: This release accomplishes many of my goals.
+#        * functionality of Crawler._find_random_url has been split between _rank_url() and
+#          _mine_url(), which work together.
+#        * Crawler._rank_url() ranks the URLs based on the recipe_url defined in the yaml config.
+#          URLs that match recipe_url get put in a higher priority list.
+#        * _mine_url processes all of the anchors of a webpage into lists.
+#        * Crawler._download_page now picks web pages to download from.
+#        * Add timeout value to requests.get()
+#        * Replaced deque (double ended queue) with Python list.  Python lists are common and the double
+#           ended queue provided no advantages.
+
 # 0.0.2  Release 2021-06-06
 #        * Logs runtime and number of web page requests.
 #        * Add Pendulum library to print out an English runtime message.
@@ -60,20 +72,8 @@
 
 # === Possible Improvements ==============================================
 #
-# * Need to have a modify the strategy for picking the next url to visit.  It needs to prioritize ones that will lead to a recipe.
-#   (url might look like https://www.example.com/recipes/pizza) Add those URLs to the queue first.
-#   Then, fall back on picking a random URL strategy.   (for version 0.1.0)
 #
-#   Current, strategy takes 7 minutes 22 seconds and downloads 122 web pages for 20 recipes.
-#   That's 6 webpages/recipe, and a recipe every 22 seconds. (Version 0.0.1.)
 #
-#   Another test yielded  4 minutes, downloaded 79 web pages for 20 recipes.
-#   That's 4 webpages/recipe, and a recipe every 12 seconds.  (Version 0.0.2.)
-#
-# * Should add a license key to the schema.org/Recipe for the Open recipes.  This should be in form of a URL
-#   that is taken from the configuration file.  (for version 0.1.0)
-#
-#  * Sitemap support could be added.  It might help some of the crawlers that exhaust all the links.
 #
 #  * I'd slightly like to have a crawler for NIH Healthy Eating website, which has public domain recipes.
 #    There are a few problems with that idea.
@@ -91,11 +91,18 @@
 #
 #        recipe_scraper issue #170:  https://github.com/hhursev/recipe-scrapers/issues/170
 #
-#  * Using deque is not being used appropriately.  Probably should be replaced with a list.
+#  * Implement saving HTML files with recipes to a folder.
+#
+#  * Sitemap support. This might help some of the crawlers that exhaust all their links.
+#    (Version 0.2.0)
+#
+#  * Some websites almost instantly exit out.  I'm not to sure why, but I'm sure other web crawlers have encountered this.
+#    Some of it may be due to using non-standard forms for URLs.  Prehaps adding a sitemap mode might be a way to work around this.
+#
+#  * Might be nice to for it to generate some kind of license report (Markdown) file of the cookbook's recipes.
 
 # ----- Python native imports -----
 import copy
-from collections import deque
 from itertools import cycle
 import json
 import logging
@@ -104,8 +111,10 @@ import os.path
 import sys
 from time import sleep
 
-# use this typing syntax, Python 3.9 allows builtins (dict, list) to used
-from typing import Dict, List
+# Use this typing syntax.
+# Python 3.9 allows builtins (dict, list) to be used
+# In Python 3.7 and 3.8, can `from __future__ import annotations`
+from typing import Dict, List, Tuple
 import urllib.robotparser
 import urllib.parse
 
@@ -123,9 +132,9 @@ import yaml
 # isn't performing correctly.
 SLOW_DEBUG = True
 
-__version__ = "0.0.2"
+__version__ = "0.1.0"
 # This is the user-agent
-USER_AGENT = f"crawl-recipes.py/{__version__}"
+USER_AGENT = f"recipe_crawler.py/{__version__}"
 REQUESTS_HEADERS = {"user-agent": USER_AGENT}
 
 # This is unused
@@ -158,15 +167,15 @@ class MultiCrawler:
         self.recipe_limit: int = recipe_limit
         self.num_recipes: int = 0
         self.crawlers: List = []
-        self.crawler_iter = None
+
         # This is for crawlers that get removed.
         self.inactive_crawler: List = []
 
-    def add_crawler(self, url: str, license=None):
-        self.crawlers.append(Crawler(url, license))
+    def add_crawler(self, url: str, recipe_url: str = "", license=None):
+        self.crawlers.append(Crawler(url, recipe_url, license))
 
         # create an iterator that will cycle through the crawlers
-        self.crawler_iter = cycle(self.crawlers)
+        self.crawler_iter: cycle[Crawler] = cycle(self.crawlers)
 
     def remove_crawler(self, base_url) -> bool:
         for i in range(len(self.crawlers)):
@@ -225,14 +234,14 @@ class MultiCrawler:
 class Crawler:
     """This crawls for one website."""
 
-    def __init__(self, url: str, license=None):
-        # this is a double ended queue, but we are just using it as a single ended one.
-        self._url_queue = deque()
+    def __init__(self, url: str, recipe_url: str = "", license=None):
         self.base_url = url
-        self._url_queue.append(url)
 
-        # This is a list of anchors found on the site that will be randomly pulled from.
-        self._anchor_list = []
+        # list of urls that have a better change to have recipes
+        self._url_list_high: List = [url]
+        # This is a list of anchors found on the site that will be randomly pulled from to continue crawling.
+        self._url_list_low: List = []
+
         # this is a list of dictionaries
         self.recipe_json: List = []
         # stores the HTML content
@@ -241,6 +250,12 @@ class Crawler:
         self.been_there_urls: List = []
         # store the number of requests.get() calls made
         self.num_get_calls = 0
+
+        # url stem that should have recipes
+        # something like:  http://www.example.com/recipes/
+        self._recipe_url = recipe_url
+        if recipe_url is None:
+            self._recipe_url = ""
 
         self._license = None
         if license and license.lower() != "proprietary":
@@ -252,6 +267,8 @@ class Crawler:
         self.robotparse.read()
         logger.debug(f"Reading robots.txt at: {robots_txt_url}")
 
+        self.urltest = URLTest(url)
+
     def crawl(self) -> int:
         """This crawls a single page.
         returns the number of recipes found"""
@@ -259,6 +276,7 @@ class Crawler:
 
         response = self._download_page()
         scrapings = self._scrape_page(response)
+        self._mine_anchors(response)
 
         if scrapings is not None:
             if isinstance(scrapings, dict):
@@ -270,20 +288,32 @@ class Crawler:
             self.html_pages.append(response.text)
             logging.debug("Found a recipe!!!")
 
-        self._find_random_url(response.text)
+        # self._find_random_url(response.text)
 
         return num_recipes
 
     def _download_page(self):
         """
-        returns a requests response object
+        Get an url from the list and download a webpage
+
+        returns a requests.Response object
         """
-        url = self._url_queue.popleft()
+        # this picks a url
+        if len(self._url_list_high) > 0:
+            # pops the like a dequeue
+            url = self._url_list_high.pop(0)
+        elif len(self._url_list_low) > 0:
+            # randomly get an item off the low list
+            r = randint(0, len(self._url_list_low))
+            url = self._url_list_low.pop(r)
+        else:
+            raise ValueError("The anchor lists are empty.")
+
         self.been_there_urls.append(url)
         logger.debug(f"Visiting {url}")
 
         self.num_get_calls += 1
-        return requests.get(url, headers=REQUESTS_HEADERS)
+        return requests.get(url, headers=REQUESTS_HEADERS, timeout=5)
 
     def _scrape_page(self, response: requests.Response):
         """
@@ -308,66 +338,65 @@ class Crawler:
 
         return None
 
-    def _find_random_url(self, html):
-        """finds a random url within the provided html,
-        store all of urls in anchors in a page in a list, randomly selects url to visit from that list,
-        makes sure that the url is valid and able to be visited."""
+    def _mine_anchors(self, response: requests.Response):
+        """Mines anchors from the webpage response.
+
+        This takes all of the anchors and evaluates them and places them into the proper lists."""
         # get all the anchor tags
-        soup = BeautifulSoup(html, "html.parser")
+        soup = BeautifulSoup(response.text, "html.parser")
         all_anchors = soup.find_all("a")
+        for a in all_anchors:
+            href = a.get("href")
+            score, url = self._rank_url(href)
 
-        href_val_for_anchors = [a.get("href") for a in all_anchors]
-        # add all the href urls from the anchor tags to a list
-        # example a tag<a href="http://example.com/">Link Text</a>
-        self._anchor_list.extend(href_val_for_anchors)
+            if score == 1:  # High score
+                self._url_list_high.append(url)
+            elif score == 0:  # Low score
+                self._url_list_low.append(url)
 
-        # NOTE: This could be stored longer.
-        urltest = URLTest(self.base_url)
+            # otherwise skip the URL, especially the ones with a -1 score
 
-        flag_no_valid_url = False
+    def _rank_url(self, url: str) -> Tuple[int, str]:
+        """Rank the url's likelihood of having recipe data.
+        parameter: url
 
-        # Loops until it find a valid URL to visit next
-        while flag_no_valid_url is False:
-            if len(self._anchor_list) == 0:
-                raise ValueError("Anchor List is empty.")
+        returns tuple (score, absolute_url)
+            score as an integer
+                 1  - likely to have a recipe
+                 0  - unlikely to have a recipe
+                -1  - do not visit
+                    (There are numerous reasons to disquality a URL).
+        """
 
-            i = randint(0, len(self._anchor_list) - 1)
-            logger.debug(f"Random number is: {i}")
-            # get a random anchor, remove it from the anchor list
-            rand_anchor = self._anchor_list.pop(i)
+        # must be a string
+        if not isinstance(url, str):
+            return (-1, url)
 
-            # must be a string
-            if not isinstance(rand_anchor, str):
-                continue
+        # these hrefs won't lead to a webpage link
+        if url.startswith(("#", "javascript:", "mailto:")):
+            return (-1, url)
 
-            # skip these href's because those won't lead to a webpage link
-            if rand_anchor.startswith(("#", "javascript:", "mailto:")):
-                continue
+        if self.urltest.is_absolute_url(url):
+            # is the URL on the same domain?
+            if not self.urltest.is_same_domain(url):
+                return (-1, url)
+        else:
+            # convert relative URL into an absolute URL
+            url = urllib.parse.urljoin(self.base_url, url)
 
-            if urltest.is_absolute_url(rand_anchor):
-                # is the URL on the same domain?
-                if not urltest.is_same_domain(rand_anchor):
-                    continue
-            else:
-                # convert relative URL into an absolute URL
-                rand_anchor = urllib.parse.urljoin(self.base_url, rand_anchor)
+        # Has the crawler already been to (visited) this URL?
+        if url in self.been_there_urls:
+            return (-1, url)
 
-            # Has the crawler already been to (visited) this URL?
-            if rand_anchor in self.been_there_urls:
-                continue
+        # Check if robots.txt rules allow going to this URL
+        if self.robotparse.can_fetch(USER_AGENT, url) is False:
+            return (-1, url)
 
-            # Check if robots.txt rules allow going to this URL
-            if self.robotparse.can_fetch(USER_AGENT, rand_anchor) is False:
-                continue
+        # check if there is some way to do this.
+        if self._recipe_url != "" and url.startswith(self._recipe_url):
+            return (1, url)
 
-            # add url to the queue
-            self._url_queue.append(rand_anchor)
-            flag_no_valid_url = True
-
-            logger.debug(f"Next URL to crawl is {rand_anchor}")
-            if SLOW_DEBUG is True:
-                # sleeps 1 second to allow for the programmer to watch it for messing up.
-                sleep(1)
+        return (0, url)
 
 
 #  See "Possible Improvements" section
@@ -438,7 +467,11 @@ if __name__ == "__main__":
         # logger.debug('KEYS: {}'.format(source['site'].keys()))
 
         logger.debug(f"Adding crawler for: {source['site']['url']}")
-        mc.add_crawler(source["site"]["url"], source["site"].get("license"))
+        mc.add_crawler(
+            source["site"]["url"],
+            source["site"].get("recipe_url"),
+            source["site"].get("license"),
+        )
 
     mc.run()
 

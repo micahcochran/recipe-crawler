@@ -1,12 +1,11 @@
 ## recipe-crawler.py
-This is a web crawler creates a cookbook from recipes found on a few websites.  
-The recipes have to be stored in [schema.org/Recipe](https://schema.org/Recipe/) format.
-This is a command line program.
+This command line interface (CLI) web crawler that creates a cookbook from recipes found on websites.  
+The website recipes have to be stored in [schema.org/Recipe](https://schema.org/Recipe/) format.
 
 Not intended for crawling a large amount of recipes. 
 
 The websites that it crawls is configured via a YAML file, see [website_sources.yaml](website_sources.yaml).
-Most of the options are to be implemented in later version.
+Most of the options are to be implemented in a later version.
 
 The cookbooks are output into a single JSON file that is named `cookbook.json`. If that file name already exists it will name it `cookbook-1.json` and so on.
 
@@ -17,6 +16,7 @@ The code tool used for formatting is [black](https://black.readthedocs.io/).
 
 ## Running
 This has to be run from the command line.  `websites_config.yaml` is a configuration file for specifying the websites to be crawled.
+
 ### Linux/Mac
 ```bash
 /some/folder/recipe-crawler$ ./recipe_crawler.py (websites_config.yaml)
@@ -51,3 +51,13 @@ OR Install the python libraries individually if preferred:
 Licensed under the Apache License, Version 2.0
 
 See the [LICENCE](LICENCE) file for terms.
+
+## Performance by version
+
+| Version | Number of Recipes | Minutes:Seconds 🠗 | # Webpages DLed | Derived ----> | webpages DLed/recipe 🠗 | seconds/recipe 🠗 | 
+| :-- | :-: | :-: | :-: | | :-: | :-: |
+| 0.1.0 | 20 | 1:16 | 39 | | 2 | 3.8 |
+| 0.0.2 | 20 | 4:00 | 79 | | 4 | 12 |
+| 0.0.1 | 20 | 7:20 | 122 | | 6 | 22 |
+
+🠗 symbol indicates that for the statistic being lower is better
