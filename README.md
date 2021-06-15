@@ -55,7 +55,7 @@ See the [LICENCE](LICENCE) file for terms.
 ## Performance by version
 
 | Version | Number of Recipes | Minutes:Seconds 🠗 | # Webpages DLed | Derived ----> | webpages DLed/recipe 🠗 | seconds/recipe 🠗 | 
-| :-- | :-: | :-: | :-: | | :-: | :-: |
+| :------ | :---------------: | :---------------: | :-------------: | ------------- | :--------------------: | :-------------: |
 | 0.1.0 | 20 | 1:16 | 39 | | 2 | 3.8 |
 | 0.0.2 | 20 | 4:00 | 79 | | 4 | 12 |
 | 0.0.1 | 20 | 7:20 | 122 | | 6 | 22 |
