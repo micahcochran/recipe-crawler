@@ -52,3 +52,8 @@ site:
   url: https://www.midgetmomma.com/
   title: Midget Momma
   license: https://creativecommons.org/licenses/by-nc-sa/3.0/
+---
+site:
+  url: https://histaminefriendlykitchen.com/
+  title: The Histamine Friendly Kitchen
+  license: https://creativecommons.org/licenses/by-nc-sa/4.0/
