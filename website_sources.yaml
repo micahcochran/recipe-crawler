@@ -5,7 +5,6 @@ site:
   title: "Crumb: A Food Blog"
   author: Isabell Boucher
   author-link: http://www.sweetestkitchen.com/about/
-  fake_user_agent: yes
 ---
 site:
   url: https://www.allrecipes.com/
@@ -20,7 +19,6 @@ site:
   title: FoodNetwork
   license: Proprietary
   distribute: no
-  fake_user_agent: yes
 ---
 site: 
   url: https://www.food.com/
@@ -34,13 +32,14 @@ site:
   title: TheKitchn
   license: Proprietary
   distribute: no
-  fake_user_agent: yes
 ---
 site:
   url: https://www.chowhound.com/
   title: Chowhound
   license: Proprietary
   distribute: no
+  start_url: https://www.chowhound.com/recipes
+  recipe_url: https://www.chowhound.com/recipes/
 ---
 site:
   url: https://bevvy.co/
@@ -52,8 +51,23 @@ site:
   url: https://www.midgetmomma.com/
   title: Midget Momma
   license: https://creativecommons.org/licenses/by-nc-sa/3.0/
+  start_url: https://www.midgetmomma.com/recipe-index
 ---
 site:
   url: https://histaminefriendlykitchen.com/
   title: The Histamine Friendly Kitchen
   license: https://creativecommons.org/licenses/by-nc-sa/4.0/
+---
+site:
+  url: https://www.myplate.gov/
+  title: USDA MyPlate
+  recipe_url: https://www.myplate.gov/recipes/
+  start_url: https://www.myplate.gov/myplate-kitchen/recipes
+  license: https://www.usda.gov/policies-and-links
+---
+site:
+  url: https://medlineplus.gov/
+  title: NIH Medline Plus - Healthy Recipes
+  start_url: https://medlineplus.gov/recipes/
+  recipe_url: https://medlineplus.gov/recipes/
+  license: view-source:https://www.nlm.nih.gov/web_policies.html#copyright

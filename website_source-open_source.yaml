@@ -2,17 +2,43 @@
 site:
   url: https://bevvy.co/cocktails
   title: Bevvy
+  recipe_url: https://bevvy.co/cocktail/
   license: https://creativecommons.org/licenses/by-sa/3.0/
 ---
 site:
   url: https://www.midgetmomma.com/
   title: Midget Momma
+  start_url: https://www.midgetmomma.com/recipe-index
   license: https://creativecommons.org/licenses/by-nc-sa/3.0/
-  ---
+---
 site:
   url: https://www.crumbblog.com/
   license: https://creativecommons.org/licenses/by-nc/3.0/
   title: "Crumb: A Food Blog"
   author: Isabell Boucher
   author-link: http://www.sweetestkitchen.com/about/
-  fake_user_agent: yes
+---
+site:
+  url: https://histaminefriendlykitchen.com/
+  title: The Histamine Friendly Kitchen
+  license: https://creativecommons.org/licenses/by-nc-sa/4.0/
+---
+site:
+  url: https://www.myplate.gov/
+  title: USDA MyPlate
+  recipe_url: https://www.myplate.gov/recipes/
+  start_url: https://www.myplate.gov/myplate-kitchen/recipes
+  license: https://www.usda.gov/policies-and-links
+---
+site:
+  url: https://medlineplus.gov/
+  title: "NIH Medline Plus - Healthy Recipes"
+  start_url: https://medlineplus.gov/recipes/
+  recipe_url: https://medlineplus.gov/recipes/
+  license: https://www.nlm.nih.gov/web_policies.html#copyright
+---
+site:
+  url: https://healthyeating.nhlbi.nih.gov/
+  title: NIH Healthy Eating
+  recipe_url:  https://healthyeating.nhlbi.nih.gov/recipedetail.aspx?
+  license: https://www.nhlbi.nih.gov/about/contact/trademark-branding-and-logo
