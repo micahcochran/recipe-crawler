@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 
 import json
-import platform 
+import platform
 import pprint
 import sys
 
 
 def usage():
-    prompt = '$'
+    prompt = "$"
     if platform.system() == "Windows":
         prompt = "C:\..>"
 
@@ -28,23 +28,24 @@ Tool for tasting (inspecting) a JSON cookbook.
     """
     return usage_msg
 
+
 if __name__ == "__main__":
     pp = pprint.PrettyPrinter()
     if len(sys.argv) < 3:
         print(usage())
         sys.exit(0)
-    
+
     with open(sys.argv[1], "r") as fp:
         cookbook = json.load(fp)
 
-    if sys.argv[2] == 'attrs':
+    if sys.argv[2] == "attrs":
         attrs = set()
         for recipe in cookbook:
             attrs = attrs.union(tuple(recipe.keys()))
 
-        attr_str = ', '.join(attrs)
-        # TODO: print this nicer 
-        pp.pprint(f'Attributes:  {attrs}')
+        attr_str = ", ".join(attrs)
+        # TODO: print this nicer
+        pp.pprint(f"Attributes:  {attrs}")
         sys.exit(0)
     elif sys.argv[2] == "length":
         print(f"Number of recipes in cookbook: {len(cookbook)}")
@@ -56,7 +57,9 @@ if __name__ == "__main__":
             print(f"Cookbook only has {len(cookbook)} recipes.  Try a smaller number.")
             sys.exit(1)
         elif idx < 0:
-            print(f"Negative numbered recipes are not valid input. The number of recipes starts at 0.")     
+            print(
+                f"Negative numbered recipes are not valid input. The number of recipes starts at 0."
+            )
             sys.exit(1)
 
         pp.pprint(cookbook[idx])
@@ -64,4 +67,3 @@ if __name__ == "__main__":
 
     results = [recipe.get(sys.argv[2]) for recipe in cookbook]
     pp.pprint(results)
-
