@@ -13,10 +13,18 @@ def usage():
 
     usage_msg = f"""
 Tool for tasting (inspecting) a JSON cookbook.
-       {prompt} taste.py [cookbook.json] [attribute]
+    {prompt} taste.py [cookbook.json] [attribute]
+        List [attribute] in all the recipes.  Returns None if unavailable
 
-       {prompt} taste.py [cookbook.json] attrs
-            List the attributes.
+    {prompt} taste.py [cookbook.json] [number]
+        List the entire JSON of the recipe at that index [number] 
+        (Note: index begins at zero)
+
+    {prompt} taste.py [cookbook.json] attrs
+        List the attributes.
+
+    {prompt} taste.py [cookbook.json] length
+        Display the number of recipes in the cookbook.        
     """
     return usage_msg
 
@@ -37,6 +45,9 @@ if __name__ == "__main__":
         attr_str = ', '.join(attrs)
         # TODO: print this nicer 
         pp.pprint(f'Attributes:  {attrs}')
+        sys.exit(0)
+    elif sys.argv[2] == "length":
+        print(f"Number of recipes in cookbook: {len(cookbook)}")
         sys.exit(0)
 
     if sys.argv[2].isdigit() is True:

@@ -42,9 +42,9 @@ site:
   recipe_url: https://www.chowhound.com/recipes/
 ---
 site:
-  url: https://bevvy.co/
-  recipe_url: https://bevvy.co/cocktail/
+  url: https://bevvy.co/cocktails
   title: Bevvy
+  recipe_url: https://bevvy.co/cocktail/
   license: https://creativecommons.org/licenses/by-sa/3.0/
 ---
 site:
@@ -70,4 +70,4 @@ site:
   title: NIH Medline Plus - Healthy Recipes
   start_url: https://medlineplus.gov/recipes/
   recipe_url: https://medlineplus.gov/recipes/
-  license: view-source:https://www.nlm.nih.gov/web_policies.html#copyright
+  license: https://www.nlm.nih.gov/web_policies.html#copyright

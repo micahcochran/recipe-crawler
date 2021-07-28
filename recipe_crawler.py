@@ -29,54 +29,15 @@
 # That cookbook can be used to test recipe software.  If open source/public domain recipes
 # are used, that cookbook could be distributed.
 
-###  RELEASE  ############################################################
-#
-# 0.2.0-pre   Release 2021-07-07
-#        * Fixed bug where robots.txt parser was disallowing some websites.
-#        * Add command line option to filter out a website by keyword
-#        * Add taste.py a CLI program that allows you examine a field in all of the recipes in the cookbook
-#        * When there is the same recipe in from the same website, don't add duplicate copy.  
-#           (There could still be the same recipe on multiple websites that isn't detected.)
-#        * Add RecipeScraperCrawler for a few website that don't follow schema.org/Recipe format.  (Not quite ready for release.)
-#           - issue in recipe-scrapers, which makes this not ready for release.
-#        * TODO: Exceptions to be implemented.
-#        * TODO: Debug printing is a little too verbose for a release.
-#
-# 0.1.0  Release 2021-06-09
-#        Note: This release accomplishes many of my goals.
-#        * functionality of Crawler._find_random_url has been split between _rank_url() and
-#          _mine_url(), which work together.
-#        * Crawler._rank_url() ranks the URLs based on the recipe_url defined in the yaml config.
-#          URLs that match recipe_url get put in a higher priority list.
-#        * _mine_url processes all of the anchors of a webpage into lists.
-#        * Crawler._download_page now picks web pages to download from.
-#        * Add timeout value to requests.get()
-#        * Replaced deque (double ended queue) with Python list.  Python lists are common and the double
-#           ended queue provided no advantages.
-
-# 0.0.2  Release 2021-06-06
-#        * Logs runtime and number of web page requests.
-#        * Add Pendulum library to print out an English runtime message.
-#        * Correct spelling errors.
-#        * Rename __VERSION__ to __version__
-#        * Add url and license to the schema output.
-#        * Add unit testing for URLTest Class.
-#        * Fixed bug in URLTest.is_same_domain(), the same domain names with different letter
-#          cases were returning false. Now, WWW.EXAMPLE.COM and www.example.com, will return
-#          True for the is_same_domain() function.
-#
-# 0.0.1  Released 2021-06-05
-#        Works, but still has most of the debugging enabled.
-#
-
 ###  DESIGN - CLASSES ####################################################
 #
 # MultiCrawler - this is a class that directs multiple instances of Crawler class.
 #
 # Crawler - handles one website.  It crawls the website, parses the schema.org/Recipe results,
-# and finds another page on the website to visit next.
+#           and finds another page on the website to visit next.
 #
-# LogUponChanged - this is intended to print a log message when the variable's value has changed.
+# RecipeScrapersCrawler - Derived from Crawler. Uses recipe_scraper library for a few websites do not
+#                         conform to schema.org/Recipe format.
 #
 # URLTest - contains tests that are performed on URLs
 #
@@ -87,14 +48,28 @@
 #
 #  * Sitemap support. This might help some of the crawlers that exhaust all their links.
 #
-#  * Some websites almost instantly exit out.  I'm not to sure why, but I'm sure other web crawlers have encountered this.
+#  * Some websites almost instantly exit out.  I'm not too sure why, but I'm sure other web crawlers have encountered this.
 #    Some of it may be due to using non-standard forms for URLs.  Prehaps adding a sitemap mode might be a way to work around this.
 #
-#  * Might be nice to for it to generate some kind of license report (Markdown) file of the cookbook's recipes.
+#  * There could be more logic to detecting if recipes are the same by the URL, but this would require some pattern matching code in the URL.
+#    Logging the matching recipes would aid in figuring that out.
+#
+#  * Perhaps implement some way of storing the images?  Could implement do some kind of caching system.  URL hash key scheme
+#     This could be stored as a json file of URLS to a folder of images.
+#     Feed the URL into a hash algorithm, like md5 (in hashlib),  (hexdigest() to output hexadecimal) then store the images as a filename. 
+#     The images could be stored as blobs in a SQLite database. 
+#
+#     Need to make it easy to interface this for external projects.
+#
+#     This behavior somehow needs to be optional.  (command line interface: --fetch-images)
+#
+#  * Fix bug: recipes are being downloaded with the same URLs as ones previously downloaded.
+#
+#  * Make the CLI a have better options that are more POSIX like.
 
 # ----- Python native imports -----
 import copy
-from datetime import timedelta
+from datetime import datetime, timedelta
 from io import StringIO
 from itertools import cycle
 import json
@@ -125,6 +100,7 @@ from recipe_scrapers._exceptions import ElementNotFoundInHtml
 # from reppy.robots import Robots
 import reppy
 import requests
+from requests.models import Response
 import scrape_schema_recipe
 import yaml
 
@@ -144,19 +120,6 @@ if recipe_scrapers_settings.TEST_MODE is not False:
     raise RuntimeError("TEST_MODE should be False.")
 recipe_scrapers_settings.TEST_MODE = True
 
-######  class LogUponChanged  ############################################
-# This class will print a message when the variable has changed
-# NOTE: This is a very simple class.
-class LogUponChanged:
-    def __init__(self, var, fmesg="Variable changed {}") -> None:
-        self.var = copy.deepcopy(var)
-        self.fmesg = fmesg
-
-    def check(self, var) -> None:
-        if var != self.var:
-            self.var = copy.deepcopy(var)
-            logging.debug(self.fmesg.format(var))
-
 
 ######  class MultiCrawler  ##############################################
 class MultiCrawler:
@@ -174,14 +137,14 @@ class MultiCrawler:
         self.inactive_crawler: List = []
 
     def add_crawler(
-        self, url: str, recipe_url: str = "", license=None, start_url: str = ""
+        self, url: str, recipe_url: str = "", license=None, start_url: str = "", site_title: str = ""
     ):
         if "myplate.gov" in url or "healthyeating.nhlbi.nih.gov" in url:
             self.crawlers.append(
-                RecipeScrapersCrawler(url, recipe_url, license, start_url)
+                RecipeScrapersCrawler(url, recipe_url, license, start_url, site_title)
             )
         else:
-            self.crawlers.append(Crawler(url, recipe_url, license, start_url))
+            self.crawlers.append(Crawler(url, recipe_url, license, start_url, site_title))
 
         # create an iterator that will cycle through the crawlers
         self.crawler_iter: cycle[Crawler] = cycle(self.crawlers)
@@ -199,18 +162,17 @@ class MultiCrawler:
 
     def run(self):
         """run crawlers sequentially until enough recipes are collected"""
-        log_change = LogUponChanged(self.num_recipes)
         # loop until the recipe limit is reached or there are no more crawlers left
         while self.num_recipes < self.recipe_limit or len(self.crawlers) < 1:
             crawler = next(self.crawler_iter)
             try:
                 self.num_recipes += crawler.crawl()
-            except ValueError:
+            except AnchorListsEmptyError as e:
+                logger.info(f"E is: {e}")
                 logger.info(f"Terminating crawler for {crawler.base_url}")
                 if self.remove_crawler(crawler.base_url) is False:
                     raise RuntimeError("Fatal error removing crawler.")
-            # log message when the number of recipes collected changes
-            log_change.check(self.num_recipes)
+
             if SLOW_DEBUG is True:
                 logger.debug(f"self.num_recipes = {self.num_recipes}")
                 # Sleeps for 1 second, allow for the user to watch for the crawler messing up.
@@ -236,8 +198,21 @@ class MultiCrawler:
         return ret
 
     def results_num_get_calls(self) -> int:
+        """Number bytes of webpages downloaded by the Crawlers."""
         return sum([c.num_get_calls for c in self.crawlers])
 
+    def results_num_bytes_html_downloaded(self) -> int:
+        """Number bytes of HTML downloaded by the Crawlers."""
+        return sum([c.num_bytes_html_downloaded for c in self.crawlers])
+
+    def generate_license_report(self) -> str:
+        """Generates a report containing the licenses, websites"""
+        md = ""
+        # TODO: might be nice to have the report sorted by site_title
+        for c in self.crawlers:
+            md += c.license_report()
+        
+        return md
 
 ##### class Crawler ######################################################
 # Provide a url and it will crawl the website scraping Schema.org/Recipe patterns.  It also finds another page to crawl.
@@ -245,10 +220,12 @@ class Crawler:
     """This crawls one website."""
 
     def __init__(
-        self, url: str, recipe_url: str = "", license=None, start_url: str = ""
+        self, url: str, recipe_url: str = "", license=None, start_url: str = "", site_title: str = ""
     ):
         self.base_url = url
 
+        # self._url_list_high and self._url_list_low are the crawler frontier
+        # start_url and url are seeds
         # list of urls that have a better change to have recipes
         self._url_list_high: List = []
         if start_url:
@@ -263,12 +240,17 @@ class Crawler:
 
         # this is a list of dictionaries
         self.recipe_json: List = []
-        # stores the HTML content
+        # stores the HTML content  -  NOTE: Nothing is done with this content at the present time.
         self.html_pages: List = []
         # list of urls already visited, so as to not visit again
         self.been_there_urls: List = []
         # store the number of requests.get() calls made
         self.num_get_calls = 0
+        # store the number of bytes of HTML downloaded
+        self.num_bytes_html_downloaded = 0
+
+        # Website's Title
+        self.site_title = site_title
 
         # url stem that should have recipes
         # something like:  http://www.example.com/recipes/
@@ -276,7 +258,8 @@ class Crawler:
         if recipe_url is None:
             self._recipe_url = ""
 
-        self._license = None
+        # _license will either be a URL (string)
+        self._license: str = ""
         if license and license.lower() != "proprietary":
             if URLTest().is_absolute_url(license):
                 self._license = license
@@ -309,27 +292,28 @@ class Crawler:
         )
         if scrapings is not None:
             if isinstance(scrapings, dict):
-                if not self._has_similar_recipe(scrapings):
+                similar_idx = self._has_similar_recipe(scrapings)
+                if  similar_idx == -1:
+                    # no similar recipe
                     self.recipe_json.append(scrapings)
                     num_recipes += 1
                     # logger.debug(f"Adding a recipe: {scrapings['name']}")
+                    self.html_pages.append(response.text)
                 else:
                     logger.debug(f"Skipping a similar recipe:{scrapings['name']}")
+                    logger.debug(f"URL 1: {scrapings['url']}")
+                    logger.debug(f"URL 2: {self.recipe_json[similar_idx]['url']}")
             else:  # for lists
                 raise NotImplemented(
-                    "This probably shouldn't go down this path, not sure of the implications."
+                    "Recipes websites currently don't have multiple recipes on one webpage, not sure of the implications."
                 )
                 num_recipes += len(scrapings)
                 self.recipe_json.extend(scrapings)
-            self.html_pages.append(response.text)
-            logging.debug("Found a recipe!!!")
-
-        # self._find_random_url(response.text)
+                self.html_pages.append(response.text)
 
         return num_recipes
 
-    def _has_similar_recipe(self, recipe) -> bool:
-        """Test if there is already a similar recipe."""
+    """     def _has_similar_recipe(self, recipe) -> bool:
         for r in self.recipe_json:
             if r["url"] == recipe["url"]:
                 return True
@@ -342,6 +326,32 @@ class Crawler:
                 return True
 
         return False
+    """
+
+    def _has_similar_recipe(self, recipe: Dict) -> bool:
+        """Test if there is already a similar recipe 
+        
+        return the index number in self.recipe_json of a similar
+        returns -1 means no recipe found."""
+        # logger.debug("calling Crawler._has_similar_recipe()")
+        if len(self.recipe_json) < 1:
+            return -1
+
+        for i in range(len(self.recipe_json)):
+            r = self.recipe_json[i]
+            # logger.debug(f'R == {r}, I == {i}')
+            if r.get("url") == recipe.get("url"):
+                return i
+
+            if (
+                r.get("name") == recipe.get("name")
+                and r.get("recipeInstructions") == recipe.get("recipeInstructions")
+                and r.get("recipeIngredient") == recipe.get("recipeIngredient")
+            ):
+                return i
+
+        logger.debug("No similar recipe.")
+        return -1
 
     def _download_page(self):
         """
@@ -349,24 +359,33 @@ class Crawler:
 
         returns a requests.Response object
         """
-        logger.debug("called _download_page()")
-        # this picks a url
-        if len(self._url_list_high) > 0:
-            # pops the like a dequeue
-            url = self._url_list_high.pop(0)
-        elif len(self._url_list_low) > 0:
-            # randomly get an item off the low list
-            r = randint(0, len(self._url_list_low) - 1)
-            url = self._url_list_low.pop(r)
-        else:
-            raise ValueError("The anchor lists are empty.")
+        # logger.debug("called _download_page()")
+        url = None
+        while not url:
+            # this picks a url
+            if len(self._url_list_high) > 0:
+                # pops the like a dequeue
+                url = self._url_list_high.pop(0)
+            elif len(self._url_list_low) > 0:
+                # randomly get an item off the low list
+                r = randint(0, len(self._url_list_low) - 1)
+                url = self._url_list_low.pop(r)
+            else:
+                raise AnchorListsEmptyError("The anchor lists are empty.")
+
+            # check if this URL has already been visited.
+            #  if url in self.been_there_urls:
+            #    url = None
+            
+            # The other way to deal with this would be to check if the URL is already in the list, don't add it.
 
         self.been_there_urls.append(url)
         logger.debug(f"Visiting {url}")
 
         self.num_get_calls += 1
-        return requests.get(url, headers=REQUESTS_HEADERS, timeout=5)
-
+        resp = requests.get(url, headers=REQUESTS_HEADERS, timeout=5)
+        self.num_bytes_html_downloaded += len(resp.text)
+        return resp
     def _scrape_page(self, response: requests.Response):
         """
         scrapes a page
@@ -383,7 +402,7 @@ class Crawler:
                 if recipe[0].get("url") is None:
                     recipe[0]["url"] = response.url
 
-                if self._license is not None and recipe[0].get("license") is None:
+                if self._license and recipe[0].get("license") is None:
                     recipe[0]["license"] = self._license
                 return recipe[0]
             else:
@@ -396,19 +415,23 @@ class Crawler:
 
         This takes all of the anchors and evaluates them and places them into the proper lists."""
         # get all the anchor tags
-        logger.debug("called _mine_anchors()")
+        # logger.debug("called _mine_anchors()")
         soup = BeautifulSoup(response.text, "html.parser")
         all_anchors = soup.find_all("a")
         for a in all_anchors:
             href = a.get("href")
             score, url = self._rank_url(href)
             # NOTE: Should I check if the webpage is already in the list?
-            logger.debug(f"score: {score}  href: {href}")
+            # logger.debug(f"score: {score}  href: {href}")
 
             if score == 1:  # High score
-                self._url_list_high.append(url)
+                # check that the URL isn't in the list before adding url
+                if url not in self._url_list_high:
+                    self._url_list_high.append(url)
             elif score == 0:  # Low score
-                self._url_list_low.append(url)
+                # check that the URL isn't in the list before adding url
+                if url not in self._url_list_low:
+                    self._url_list_low.append(url)
 
             # otherwise skip the URL, especially the ones with a -1 score
 
@@ -455,6 +478,52 @@ class Crawler:
 
         return (0, url)
 
+    # TODO Needs to also report the author because some licenses require attribution.
+    def license_report(self) -> str:
+        """Generate a license report
+
+        returns a string in markdown format"""
+        # Does this have any recipe stored?
+        if len(self.recipe_json) < 1:
+            # No recipe content
+            return ""
+
+        # store markdown text in md
+        md = f"## {self.site_title}\n\n"
+        md += f"Website URL: <{self.base_url}>\n"
+        # is this a url or not value
+        if self._license:
+            # get the title of the license
+            # by downloading the license URL and scraping the its <title> tag
+            resp = requests.get(self._license)
+            soup = BeautifulSoup(resp.text, features="lxml")
+            try:
+                license_title = soup.title.text.replace("\n", "")
+                md += f"License: [{license_title}]({self._license})\n"
+            except AttributeError:
+                # without license title
+                md += f"License: <{self._license}>\n"
+
+        recipe_names_urls_authors = [(recipe["name"], recipe["url"], recipe.get("author")) for recipe in self.recipe_json]
+        md += "Recipes:\n"
+        recipe_names_urls_authors.sort()
+        for name, url, author in recipe_names_urls_authors:
+            md += f" * [{name}]({url})"
+            if author:
+                if isinstance(author, str):
+                    # a string type is outside the schema.org/Recipe spec, but Food.com website behaves this way
+                    md += f" by {author}"
+                elif isinstance(author, dict) and author.get('name'):
+                    if author.get('url'):
+                        md += f" by [{author['name']}]({author['url']})"
+                    else:
+                        md += f" by {author.get('name')}"
+
+            md += "\n"
+        md += "\n"
+
+        return md
+
 
 # TODO: most of the configuration data isn't currently used.
 def load_website_sources_list(
@@ -468,11 +537,14 @@ def load_website_sources_list(
         return [data for data in yaml.safe_load_all(fp)]
 
 
+### RecipeScrapersCrawler ############################################################################################
+
+
 class RecipeScrapersCrawler(Crawler):
     """Crawlers that rely upon the recipe_scraper library."""
 
     def __init__(
-        self, url: str, recipe_url: str = "", license=None, start_url: str = ""
+        self, url: str, recipe_url: str = "", license=None, start_url: str = "", site_title: str = ""
     ):
         # Modify here to implement all of recipe_scrapers "Drivers", not needed at the moment.
 
@@ -486,7 +558,7 @@ class RecipeScrapersCrawler(Crawler):
         else:
             raise NotImplemented(f"Website '{url}' has not been implemented.")
 
-        super().__init__(url, recipe_url, license, start_url)
+        super().__init__(url, recipe_url, license, start_url, site_title)
 
     def _scrape_page(self, response: requests.Response):
         """
@@ -517,11 +589,12 @@ class RecipeScrapersCrawler(Crawler):
             # this is a list of strings
             d["recipeIngredient"] = rs.ingredients()
         except (AttributeError, ElementNotFoundInHtml):
-            # uncaught parsing error from BeautifulSoup, there might be a better way for recipe_scrapers to handle this.
-            # TODO write an issue about this in recipe_scrapers
             return None
 
         d["name"] = rs.title()
+
+        # this is the text version of the tag
+        d["recipeInstructions"] = rs.instructions()
 
         try:
             if rs.total_time():
@@ -530,25 +603,26 @@ class RecipeScrapersCrawler(Crawler):
                 d["totalTime"] = isodate.duration_isoformat(
                     timedelta(minutes=rs.total_time())
                 )
-        except NotImplemented:
+        except (NotImplemented, ElementNotFoundInHtml):
             pass
 
         try:
-            #   <img id="ctl00_bodyContent_imgLarge" class="recipe_image" src="/images/food/Quinoa_And_Black_Bean_Salad.jpg" alt="Photograph of the completed recipe." style="border-width:0px;" />
-            # soup.find("img", {"class": "recipe_image"}).src
             if rs.image():
                 d["image"] = rs.image()
-        except:  # <--- bad bad bad Hack, this will catch any exception whatsoever, not just the NotImplemented
-            # Pull Request for image() for NIH healthyeating, but currently not working
+            # BUG in recipe_scraper:  https://healthyeating.nhlbi.nih.gov/recipedetail.aspx?linkId=16&cId=6&rId=236 produces AttributeError which it shouldn't
+        except (ElementNotFoundInHtml, AttributeError):
             pass
 
-        if rs.yields():
-            d["recipeYield"] = rs.yields()
+        try:
+            if rs.yields():
+                d["recipeYield"] = rs.yields()
+        except ElementNotFoundInHtml:
+            pass
 
-        # this is the text version of the tag
-        d["recipeInstructions"] = rs.instructions()
+        # these are other additions to the dictionary not really relevant to content from the recipe_scraper library
 
-        # these are other additions that are not really relevant to recipe_scraper
+        d["@context"] = "https://schema.org"
+        d["@type"] = "Recipe",
         if self._license is not None:
             d["license"] = self._license
 
@@ -593,6 +667,16 @@ class RecipeCrawlerException(Exception):
         return f"recipe_crawler exception: {self.message}"
 
 
+class AnchorListsEmptyError(Exception):
+    """Normal exception when the anchor lists are empty."""
+    def __init__(self, message):
+        self.message = message
+        super().__init__(message)
+
+    def __str__(self):
+        return f"AnchorListsEmptyError: {self.message}"
+
+
 class RecipeCrawlerNetworkError(RecipeCrawlerException):
     """Network Error"""
 
@@ -607,7 +691,7 @@ def usage():
         prompt = "C:\..>"
 
     msg = f"""
-Recipce Crawler to compile a cookbook.
+Recipe Crawler to that saves a cookbook to a JSON file.
     {prompt} recipe.py (config.yaml) (searchword)
     """
     return msg
@@ -646,8 +730,11 @@ if __name__ == "__main__":
         # use default name for configuration
         website_sources_list = load_website_sources_list()
 
+    # log to a file
+    logger.add(f"recipe_crawler_{datetime.now().isoformat()}.log")
+
     start_time = pendulum.now()
-    #   NOTE: Get 20 recipes for testing.
+    #   NOTE: Get 20 total recipes for testing.
     mc = MultiCrawler(20)
     for source in website_sources_list:
         # logger.debug('KEYS: {}'.format(source['site'].keys()))
@@ -659,6 +746,7 @@ if __name__ == "__main__":
             source["site"].get("license"),
             # this is a URL the one that most-likely to get to recipes quickly, such as an index or landing pages for recipes.
             source["site"].get("start_url"),
+            source["site"].get("title"),
         )
 
     mc.run()
@@ -666,6 +754,7 @@ if __name__ == "__main__":
     recipes_dict = mc.results_dict()
 
     # create unique cookbook filename
+    # this serves as a repository for the crawler.
     filename = "cookbook.json"
     i = 0
     while os.path.exists(filename):
@@ -676,8 +765,16 @@ if __name__ == "__main__":
     with open(filename, "w") as fp:
         json.dump(recipes_dict, fp)
 
-    logger.info(f"Wrote file '{filename}'.")
+    
+    license_filename = f"licenses-{i}.md"
+    with open(license_filename, "w") as fp:
+        fp.write(mc.generate_license_report())
+
+    logger.info(f"Wrote files '{filename}' and '{license_filename}'.")
 
     logger.info(f"Number of web pages downloaded: {mc.results_num_get_calls()}")
+
+    logger.info(f"Number of HTML bytes downloaded: {mc.results_num_bytes_html_downloaded()/2**20} MiB")
+    
     runtime_str = pendulum.now().diff(start_time).in_words()
     logger.info(f"Program's Runtime: {runtime_str}")
