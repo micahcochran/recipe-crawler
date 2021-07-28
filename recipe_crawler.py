@@ -691,7 +691,7 @@ def usage():
         prompt = "C:\..>"
 
     msg = f"""
-Recipce Crawler to that saves a cookbook to a JSON file.
+Recipe Crawler to that saves a cookbook to a JSON file.
     {prompt} recipe.py (config.yaml) (searchword)
     """
     return msg

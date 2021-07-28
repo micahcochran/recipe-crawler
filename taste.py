@@ -24,8 +24,7 @@ Tool for tasting (inspecting) a JSON cookbook.
         List the attributes.
 
     {prompt} taste.py [cookbook.json] length
-        Display the number of recipes in the cookbook.
-        
+        Display the number of recipes in the cookbook.        
     """
     return usage_msg
 
