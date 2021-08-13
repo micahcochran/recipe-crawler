@@ -68,12 +68,10 @@
 #  * Make the CLI a have better options that are more POSIX like.
 
 # ----- Python native imports -----
-import copy
 from datetime import datetime, timedelta
 from io import StringIO
 from itertools import cycle
 import json
-import logging
 import platform
 from random import randint
 import os.path
@@ -83,7 +81,7 @@ from time import sleep
 # Use this typing syntax.
 # Python 3.9 allows builtins (dict, list) to be used
 # In Python 3.7 and 3.8, use `from __future__ import annotations`
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Union
 
 # import urllib.robotparser
 import urllib.parse
@@ -100,7 +98,6 @@ from recipe_scrapers._exceptions import ElementNotFoundInHtml
 # from reppy.robots import Robots
 import reppy
 import requests
-from requests.models import Response
 import scrape_schema_recipe
 import yaml
 
@@ -108,7 +105,7 @@ import yaml
 # isn't performing correctly.
 SLOW_DEBUG = True
 
-__version__ = "0.2.0-pre"
+__version__ = "0.2.1"
 # This is the user-agent
 USER_AGENT_ROBOTS = "RecipeCrawlerPY"
 USER_AGENT = f"RecipeCrawlerPY/{__version__}"
@@ -143,7 +140,7 @@ class MultiCrawler:
         license=None,
         start_url: str = "",
         site_title: str = "",
-    ):
+    ) -> None:
         if "myplate.gov" in url or "healthyeating.nhlbi.nih.gov" in url:
             self.crawlers.append(
                 RecipeScrapersCrawler(url, recipe_url, license, start_url, site_title)
@@ -167,7 +164,7 @@ class MultiCrawler:
 
         return False
 
-    def run(self):
+    def run(self) -> None:
         """run crawlers sequentially until enough recipes are collected"""
         # loop until the recipe limit is reached or there are no more crawlers left
         while self.num_recipes < self.recipe_limit or len(self.crawlers) < 1:
@@ -239,7 +236,7 @@ class Crawler:
 
         # self._url_list_high and self._url_list_low are the crawler frontier
         # start_url and url are seeds
-        # list of urls that have a better change to have recipes
+        # list of urls that have a better chance to have recipes
         self._url_list_high: List = []
         if start_url:
             logger.debug(f"Add start_url: {start_url}")
@@ -341,7 +338,7 @@ class Crawler:
         return False
     """
 
-    def _has_similar_recipe(self, recipe: Dict) -> bool:
+    def _has_similar_recipe(self, recipe: Dict) -> int:
         """Test if there is already a similar recipe
 
         return the index number in self.recipe_json of a similar
@@ -366,7 +363,7 @@ class Crawler:
         logger.debug("No similar recipe.")
         return -1
 
-    def _download_page(self):
+    def _download_page(self) -> requests.models.Response:
         """
         Get an url from the list and download a webpage
 
@@ -403,7 +400,7 @@ class Crawler:
     def _scrape_page(self, response: requests.Response):
         """
         scrapes a page
-        input: response is a requests.Response object from requests.get()
+        input: response is a requests.models.Response object from requests.get()
 
         return dict or List, if it is empty it will be None
         """
@@ -424,7 +421,7 @@ class Crawler:
 
         return None
 
-    def _mine_anchors(self, response: requests.Response):
+    def _mine_anchors(self, response: requests.models.Response) -> None:
         """Mines anchors from the webpage response.
 
         This takes all of the anchors and evaluates them and places them into the proper lists."""
@@ -582,10 +579,10 @@ class RecipeScrapersCrawler(Crawler):
 
         super().__init__(url, recipe_url, license, start_url, site_title)
 
-    def _scrape_page(self, response: requests.Response):
+    def _scrape_page(self, response: requests.models.Response) -> Dict:
         """
         scrapes a page
-        input: response is a requests.Response object from requests.get()
+        input: response is a requests.models.Response object from requests.get()
 
         return dict or List, if it is empty it will be None
         """
@@ -600,7 +597,7 @@ class RecipeScrapersCrawler(Crawler):
             return dict
 
     # TODO: This function will need to be rewritten based on how exceptions work in recipe-scrapers versions after 13.3.0
-    def _convert_recipe_scraper_to_schema_dict(self, rs, url: str) -> Dict:
+    def _convert_recipe_scraper_to_schema_dict(self, rs, url: str) -> Union[Dict, None]:
         """Convert recipe-scraper object into a recipe schema dictionary"""
         logger.debug("called _convert_recipe_scraper_to_schema_dict()")
         d = {}
@@ -615,8 +612,8 @@ class RecipeScrapersCrawler(Crawler):
 
         d["name"] = rs.title()
 
-        # this is the text version of the tag
-        d["recipeInstructions"] = rs.instructions()
+        # this is the list version of the tag
+        d["recipeInstructions"] = rs.instructions().split("\n")
 
         try:
             if rs.total_time():
@@ -685,7 +682,7 @@ class RecipeCrawlerException(Exception):
         self.message = message
         super().__init__(message)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"recipe_crawler exception: {self.message}"
 
 
@@ -696,7 +693,7 @@ class AnchorListsEmptyError(Exception):
         self.message = message
         super().__init__(message)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"AnchorListsEmptyError: {self.message}"
 
 
@@ -708,7 +705,7 @@ class RecipeCrawlerNetworkError(RecipeCrawlerException):
         super().__init__(message)
 
 
-def usage():
+def usage() -> str:
     prompt = "$"
     if platform.system() == "Windows":
         prompt = "C:\..>"
@@ -797,7 +794,7 @@ if __name__ == "__main__":
     logger.info(f"Number of web pages downloaded: {mc.results_num_get_calls()}")
 
     logger.info(
-        f"Number of HTML bytes downloaded: {mc.results_num_bytes_html_downloaded()/2**20} MiB"
+        f"Number of HTML bytes downloaded: {mc.results_num_bytes_html_downloaded()/2**20:.3f} MiB"
     )
 
     runtime_str = pendulum.now().diff(start_time).in_words()

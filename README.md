@@ -48,6 +48,7 @@ OR Install the python libraries individually:
 * [Pendulum](https://pendulum.eustace.io/)
 * [PyYAML](https://pyyaml.org/)
 * [requests](https://docs.python-requests.org/)
+* [reppy](https://github.com/seomoz/reppy)
 * [recipe-scrapers](https://github.com/hhursev/recipe-scrapers)
 * [scrape-schema-recipe](https://github.com/micahcochran/scrape-schema-recipe)
 
@@ -61,6 +62,7 @@ See the [LICENCE](LICENCE) file for terms.
 
 | Version | Number of Recipes | Minutes:Seconds 🠗 | # Webpages DLed | Derived ----> | webpages DLed/recipe 🠗 | seconds/recipe 🠗 | 
 | :------ | :---------------: | :---------------: | :-------------: | ------------- | :--------------------: | :-------------: |
+| 0.2.1 | 20 | 1:55 | 61 | | 3 | 5.8 |
 | 0.2.0-pre | 20 | 1:28 | 51* | | 2.6 | 4.4 |
 | 0.1.0 | 20 | 1:16 | 39 | | 2 | 3.8 |
 | 0.0.2 | 20 | 4:00 | 79 | | 4 | 12 |
