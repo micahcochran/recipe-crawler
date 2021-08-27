@@ -6,18 +6,19 @@ import pprint
 import sys
 
 
-def usage():
+def usage() -> str:
     prompt = "$"
     if platform.system() == "Windows":
         prompt = "C:\..>"
 
     usage_msg = f"""
 Tool for tasting (inspecting) a JSON cookbook.
+Usage:
     {prompt} taste.py [cookbook.json] [attribute]
         List [attribute] in all the recipes.  Returns None if unavailable
 
-    {prompt} taste.py [cookbook.json] [number]
-        List the entire JSON of the recipe at that index [number] 
+    {prompt} taste.py [cookbook.json] INDEX
+        List the entire JSON of the recipe at that index number INDEX 
         (Note: index begins at zero)
 
     {prompt} taste.py [cookbook.json] attrs
@@ -29,7 +30,7 @@ Tool for tasting (inspecting) a JSON cookbook.
     return usage_msg
 
 
-if __name__ == "__main__":
+def main():
     pp = pprint.PrettyPrinter()
     if len(sys.argv) < 3:
         print(usage())
@@ -67,3 +68,7 @@ if __name__ == "__main__":
 
     results = [recipe.get(sys.argv[2]) for recipe in cookbook]
     pp.pprint(results)
+
+
+if __name__ == "__main__":
+    main()

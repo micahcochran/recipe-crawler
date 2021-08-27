@@ -65,26 +65,30 @@
 #
 #  * Fix bug: recipes are being downloaded with the same URLs as ones previously downloaded.
 #
-#  * Make the CLI a have better options that are more POSIX like.
+#  * Improve command line options and make them more POSIX-like.
+#
+#  * Number of bytes downloaded is not accurate due to not being able to always get the "Content-Length" header.
+#
+#  * Could make the recipe-scrapers library an optional add-on.  It is currently only used for two websites.  
+#    Probably should move it to its own file that only gets imported when needed.
 
 # ----- Python native imports -----
+import argparse
 from datetime import datetime, timedelta
 from io import StringIO
 from itertools import cycle
 import json
-import platform
 from random import randint
 import os.path
 import sys
 from time import sleep
+import urllib.parse
 
 # Use this typing syntax.
 # Python 3.9 allows builtins (dict, list) to be used
 # In Python 3.7 and 3.8, use `from __future__ import annotations`
 from typing import Dict, List, Tuple, Union
 
-# import urllib.robotparser
-import urllib.parse
 
 # ----- external imports -----
 from bs4 import BeautifulSoup
@@ -94,18 +98,16 @@ import pendulum
 import recipe_scrapers
 from recipe_scrapers.settings import settings as recipe_scrapers_settings
 from recipe_scrapers._exceptions import ElementNotFoundInHtml
-
-# from reppy.robots import Robots
 import reppy
 import requests
 import scrape_schema_recipe
 import yaml
 
 # Flag slows down the execution of the program so that it is enough time to be able to react if it
-# isn't performing correctly.
+# isn't performing correctly, when set to True.  False turns this off.
 SLOW_DEBUG = True
 
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 # This is the user-agent
 USER_AGENT_ROBOTS = "RecipeCrawlerPY"
 USER_AGENT = f"RecipeCrawlerPY/{__version__}"
@@ -180,7 +182,7 @@ class MultiCrawler:
             if SLOW_DEBUG is True:
                 logger.debug(f"self.num_recipes = {self.num_recipes}")
                 # Sleeps for 1 second, allow for the user to watch for the crawler messing up.
-                # In effect also "throttling" out how much bandwidth is being used.
+                # This somewhat "throttles" how much bandwidth.  Would need more code to actually implement throttling.
                 sleep(1)
 
     def results_dict(self) -> List[Dict]:
@@ -205,9 +207,9 @@ class MultiCrawler:
         """Number bytes of webpages downloaded by the Crawlers."""
         return sum([c.num_get_calls for c in self.crawlers])
 
-    def results_num_bytes_html_downloaded(self) -> int:
-        """Number bytes of HTML downloaded by the Crawlers."""
-        return sum([c.num_bytes_html_downloaded for c in self.crawlers])
+    def results_num_bytes_downloaded(self) -> int:
+        """Number bytes downloaded by the Crawlers."""
+        return sum([c.num_bytes_downloaded for c in self.crawlers])
 
     def generate_license_report(self) -> str:
         """Generates a report containing the licenses, websites"""
@@ -256,8 +258,10 @@ class Crawler:
         self.been_there_urls: List = []
         # store the number of requests.get() calls made
         self.num_get_calls = 0
-        # store the number of bytes of HTML downloaded
-        self.num_bytes_html_downloaded = 0
+        # store the number of bytes downloaded
+        #    skips robots.txt, counts compressed bytes when those are reported by server, otherwise counts uncompressed bytes.
+        #    This is an inaccurate metric.
+        self.num_bytes_downloaded = 0
 
         # Website's Title
         self.site_title = site_title
@@ -275,9 +279,7 @@ class Crawler:
                 self._license = license
 
         robots_txt_url = urllib.parse.urljoin(url, "robots.txt")
-        #        self.robotparse = urllib.robotparser.RobotFileParser(robots_txt_url)
-        #        self.robotparse.read()
-        # TODO: should I try to fix this?
+
         try:
             robots = reppy.robots.Robots.fetch(robots_txt_url)
         except reppy.exceptions.ConnectionExceptions as e:
@@ -323,21 +325,6 @@ class Crawler:
 
         return num_recipes
 
-    """     def _has_similar_recipe(self, recipe) -> bool:
-        for r in self.recipe_json:
-            if r["url"] == recipe["url"]:
-                return True
-
-            if (
-                r["name"] == recipe["name"]
-                and r["recipeInstructions"] == recipe["recipeInstructions"]
-                and r["recipeIngredient"] == recipe["recipeIngredient"]
-            ):
-                return True
-
-        return False
-    """
-
     def _has_similar_recipe(self, recipe: Dict) -> int:
         """Test if there is already a similar recipe
 
@@ -374,8 +361,7 @@ class Crawler:
         while not url:
             # this picks a url
             if len(self._url_list_high) > 0:
-                # pops the like a dequeue
-                url = self._url_list_high.pop(0)
+                url = self._url_list_high.pop()
             elif len(self._url_list_low) > 0:
                 # randomly get an item off the low list
                 r = randint(0, len(self._url_list_low) - 1)
@@ -394,7 +380,13 @@ class Crawler:
 
         self.num_get_calls += 1
         resp = requests.get(url, headers=REQUESTS_HEADERS, timeout=5)
-        self.num_bytes_html_downloaded += len(resp.text)
+        if resp.headers.get("Content-Length"):
+            # compressed size
+            self.num_bytes_downloaded += int(resp.headers.get("Content-Length"))
+        else:
+            # uncompressed size
+            self.num_bytes_downloaded += len(resp.text)
+
         return resp
 
     def _scrape_page(self, response: requests.Response):
@@ -507,6 +499,14 @@ class Crawler:
             # get the title of the license
             # by downloading the license URL and scraping the its <title> tag
             resp = requests.get(self._license)
+
+            if resp.headers.get("Content-Length"):
+                # compressed size
+                self.num_bytes_downloaded += int(resp.headers.get("Content-Length"))
+            else:
+                # uncompressed size
+                self.num_bytes_downloaded += len(resp.text)
+
             soup = BeautifulSoup(resp.text, features="lxml")
             try:
                 license_title = soup.title.text.replace("\n", "")
@@ -539,7 +539,6 @@ class Crawler:
         return md
 
 
-# TODO: most of the configuration data isn't currently used.
 def load_website_sources_list(
     config_filename: str = "website_sources.yaml",
 ) -> List[Dict]:
@@ -565,11 +564,10 @@ class RecipeScrapersCrawler(Crawler):
         start_url: str = "",
         site_title: str = "",
     ):
-        # Modify here to implement all of recipe_scrapers "Drivers", not needed at the moment.
-
         # Bypass requests.get by calling the website's class directly.
         # NOTE: Other websites could be supported.  That support would go here
         #       and in the MultiCrawler.add_crawler()
+        # CHECK FOR SUPPORT FROM scrape-schema-recipe BEFORE ADDING A recipe-scraper DRIVER
         if "myplate.gov" in url:
             self.ScraperDriver = recipe_scrapers.USDAMyPlate
         elif "healthyeating.nhlbi.nih.gov" in url:
@@ -677,6 +675,9 @@ class URLTest:
         return self.basesplit.netloc.lower() == urlspl.netloc.lower()
 
 
+### Exceptions ###########################################################
+
+
 class RecipeCrawlerException(Exception):
     def __init__(self, message):
         self.message = message
@@ -700,62 +701,111 @@ class AnchorListsEmptyError(Exception):
 class RecipeCrawlerNetworkError(RecipeCrawlerException):
     """Network Error"""
 
-    def __init__(self, other_err):
+    def __init__(self, other_err: str):
         message = f"Network Error: {other_err}"
         super().__init__(message)
 
 
-def usage() -> str:
-    prompt = "$"
-    if platform.system() == "Windows":
-        prompt = "C:\..>"
+### Exceptions related to the CLI ###
+class UserDuplicateFilenameError(Exception):
+    """Duplicate filename error"""
 
-    msg = f"""
-Recipe Crawler to that saves a cookbook to a JSON file.
-    {prompt} recipe.py (config.yaml) (searchword)
-    """
-    return msg
+    def __init__(self, filename: str):
+        self.filename = filename
+        super().__init__(filename)
+
+    def __str__(self) -> str:
+        return f"UserDuplicateFilenameError: There is already a file named '{self.filename}'"
+
+
+class UserEmptyWebsiteListError(Exception):
+    """Empty Website List error"""
+
+    def __init__(self, message=None):
+        self.message = message
+        super().__init__(message)
+
+    def __str__(self) -> str:
+        return (
+            "UserDuplicateFilenameError: Website List is empty, filter is too narrow."
+        )
 
 
 ##########  MAIN  #########################################################
-if __name__ == "__main__":
-    website_sources_list = []
+def main(sys_args: List = sys.argv[1:]) -> None:
+    website_sources_list: List = []
 
-    if "--help" in sys.argv or "-h" in sys.argv:
-        print(usage())
-        sys.exit(0)
+    parser = argparse.ArgumentParser(
+        description="Recipe Crawler to that saves a cookbook to a JSON file."
+    )
 
-    # if there is one argument use that file name for the configuration
-    if len(sys.argv) >= 2:
-        # does this file exist?
-        if not os.path.exists(sys.argv[1]):
-            logger.error("File '{}' does not exist. Exiting.", sys.argv[1])
-            sys.exit(1)
-        website_sources_list = load_website_sources_list(sys.argv[1])
-        if len(sys.argv) == 3:
-            # argument filter the url list
-            def arg_in_list(arg):
-                return sys.argv[2].lower() in arg["site"]["url"]
+    parser.add_argument(
+        "-c",
+        "--config",
+        type=str,
+        default="website_sources.yaml",
+        help="website configuration YAML file",
+    )
+    parser.add_argument(
+        "-f", "--filter", type=str, help="filter names of websites to crawl"
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Limit of number of recipes to collect (default: 20)",
+    )
+    parser.add_argument("-o", "--output", type=str, help="Output to a JSON file")
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {__version__}"
+    )
 
-            website_sources_list = list(filter(arg_in_list, website_sources_list))
+    args = parser.parse_args()
 
-            logger.info(
-                f"filtering source list based on '{sys.argv[2]}' to {len(website_sources_list)} number of items"
-            )
+    if args.output:
+        if not args.output.lower().endswith(".json"):
+            args.output += ".json"
 
-            if len(website_sources_list) == 0:
-                logger.info("This filter filtered out all the websites.  Exiting.")
-                sys.exit(0)
+        if os.path.exists(args.output):
+            raise UserDuplicateFilenameError(filename=args.output)
     else:
-        # use default name for configuration
-        website_sources_list = load_website_sources_list()
+        # create unique cookbook filename
+        # this serves as a repository for the crawler.
+        args.output = "cookbook.json"
+        i = 0
+        while os.path.exists(args.output):
+            i += 1
+            args.output = f"cookbook-{i}.json"
+
+    website_sources_list = load_website_sources_list()
+
+    if args.filter:
+        # argument filter the url list
+        def arg_in_list(a):
+            return args.filter.lower() in a["site"]["url"]
+
+        website_sources_list = list(filter(arg_in_list, website_sources_list))
+        # Alternatively:
+        # website_sources_list = [args.filter.lower() in a["site"]["url"] for a in website_sources_list]
+
+        logger.info(
+            f"filtering source list based on '{args.filter}' to {len(website_sources_list)} number of items"
+        )
+
+        if len(website_sources_list) == 0:
+            # logger.info("This filter filtered out all the websites.  Exiting.")
+            # sys.exit(0)
+            raise UserEmptyWebsiteListError
 
     # log to a file
     logger.add(f"recipe_crawler_{datetime.now().isoformat()}.log")
 
     start_time = pendulum.now()
-    #   NOTE: Get 20 total recipes for testing.
-    mc = MultiCrawler(20)
+
+    logger.info(f"Crawling for {args.limit} recipes.")
+
+    mc = MultiCrawler(args.limit)
+
     for source in website_sources_list:
         # logger.debug('KEYS: {}'.format(source['site'].keys()))
 
@@ -773,29 +823,30 @@ if __name__ == "__main__":
 
     recipes_dict = mc.results_dict()
 
-    # create unique cookbook filename
-    # this serves as a repository for the crawler.
-    filename = "cookbook.json"
-    i = 0
-    while os.path.exists(filename):
-        i += 1
-        filename = f"cookbook-{i}.json"
     # save to file
-
-    with open(filename, "w") as fp:
+    with open(args.output, "w") as fp:
         json.dump(recipes_dict, fp)
 
-    license_filename = f"licenses-{i}.md"
+    license_filename = f"license-{args.output[:-5]}.md"
     with open(license_filename, "w") as fp:
         fp.write(mc.generate_license_report())
 
-    logger.info(f"Wrote files '{filename}' and '{license_filename}'.")
+    logger.info(f"Wrote files '{args.output}' and '{license_filename}'.")
+
 
     logger.info(f"Number of web pages downloaded: {mc.results_num_get_calls()}")
 
     logger.info(
-        f"Number of HTML bytes downloaded: {mc.results_num_bytes_html_downloaded()/2**20:.3f} MiB"
+        f"Number of bytes downloaded: {mc.results_num_bytes_downloaded()/2**20:.3f} MiB*"
     )
+    logger.info("  * Metric is not accurate.")
+    runtime = pendulum.now().diff(start_time)
+    # README.md row printer, INCOMPLETE
+#    logger.info(f"row:  | {__version__} | {args.limit} | | {mc.results_num_get_calls()} | | {mc.results_num_get_calls() / args.limit} | |")
+    logger.info(f"Program's Runtime: {runtime.in_words()}")
 
-    runtime_str = pendulum.now().diff(start_time).in_words()
-    logger.info(f"Program's Runtime: {runtime_str}")
+
+if __name__ == "__main__":
+    main()
+
+
