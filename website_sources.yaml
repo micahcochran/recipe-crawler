@@ -71,3 +71,10 @@ site:
   start_url: https://medlineplus.gov/recipes/
   recipe_url: https://medlineplus.gov/recipes/
   license: https://www.nlm.nih.gov/web_policies.html#copyright
+---
+site:
+  url: https://www.foodista.com/
+  title: Foodista
+  start_url: https://www.foodista.com/blog/recipes-cooking
+  recipe_url: https://www.foodista.com/recipe/
+  license: http://creativecommons.org/licenses/by/3.0/
