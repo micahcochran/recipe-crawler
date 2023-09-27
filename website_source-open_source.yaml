@@ -42,3 +42,10 @@ site:
   title: NIH Healthy Eating
   recipe_url:  https://healthyeating.nhlbi.nih.gov/recipedetail.aspx?
   license: https://www.nhlbi.nih.gov/about/contact/trademark-branding-and-logo
+---
+site:
+  url: https://www.foodista.com/
+  title: Foodista
+  start_url: https://www.foodista.com/blog/recipes-cooking
+  recipe_url: https://www.foodista.com/recipe/
+  license: http://creativecommons.org/licenses/by/3.0/

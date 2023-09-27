@@ -1,5 +1,6 @@
 __pycache__/
 donotinclude/
+.venv/
 *.json
 *.log
 licenses*.md

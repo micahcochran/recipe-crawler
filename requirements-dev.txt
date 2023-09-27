@@ -1,0 +1,4 @@
+# Development related requirements including types
+types-beautifulsoup4
+types-PyYAML
+types-requests

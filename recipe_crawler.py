@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 #
-# Copyright 2021  Micah Cochran
+# Copyright 2021-2023  Micah Cochran
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -49,7 +49,7 @@
 #  * Sitemap support. This might help some of the crawlers that exhaust all their links.
 #
 #  * Some websites almost instantly exit out.  I'm not too sure why, but I'm sure other web crawlers have encountered this.
-#    Some of it may be due to using non-standard forms for URLs.  Prehaps adding a sitemap mode might be a way to work around this.
+#    Some of it may be due to using non-standard forms for URLs.  Perhaps adding a sitemap mode might be a way to work around this.
 #
 #  * There could be more logic to detecting if recipes are the same by the URL, but this would require some pattern matching code in the URL.
 #    Logging the matching recipes would aid in figuring that out.
@@ -75,19 +75,19 @@
 # ----- Python native imports -----
 import argparse
 from datetime import datetime, timedelta
-from io import StringIO
 from itertools import cycle
 import json
 from random import randint
 import os.path
 import sys
-from time import sleep
+import time
 import urllib.parse
+import urllib.robotparser
 
 # Use this typing syntax.
 # Python 3.9 allows builtins (dict, list) to be used
 # In Python 3.7 and 3.8, use `from __future__ import annotations`
-from typing import Dict, List, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union
 
 
 # ----- external imports -----
@@ -97,8 +97,8 @@ from loguru import logger
 import pendulum
 import recipe_scrapers
 from recipe_scrapers.settings import settings as recipe_scrapers_settings
+from recipe_scrapers._abstract import AbstractScraper
 from recipe_scrapers._exceptions import ElementNotFoundInHtml
-import reppy
 import requests
 import scrape_schema_recipe
 import yaml
@@ -107,17 +107,12 @@ import yaml
 # isn't performing correctly, when set to True.  False turns this off.
 SLOW_DEBUG = True
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 # This is the user-agent
 USER_AGENT_ROBOTS = "RecipeCrawlerPY"
 USER_AGENT = f"RecipeCrawlerPY/{__version__}"
 REQUESTS_HEADERS = {"user-agent": USER_AGENT}
 
-
-# put it in test mode for RecipeScrapersCrawler
-if recipe_scrapers_settings.TEST_MODE is not False:
-    raise RuntimeError("TEST_MODE should be False.")
-recipe_scrapers_settings.TEST_MODE = True
 
 
 ######  class MultiCrawler  ##############################################
@@ -139,7 +134,7 @@ class MultiCrawler:
         self,
         url: str,
         recipe_url: str = "",
-        license=None,
+        license: Union[str, None] = None,
         start_url: str = "",
         site_title: str = "",
     ) -> None:
@@ -171,8 +166,19 @@ class MultiCrawler:
         # loop until the recipe limit is reached or there are no more crawlers left
         while self.num_recipes < self.recipe_limit or len(self.crawlers) < 1:
             crawler = next(self.crawler_iter)
+
+            # if True, delay crawling this URL due to Crawl-delay in robots.txt
+            if crawler.delay_crawl():
+                if SLOW_DEBUG is True:
+                    time.sleep(1)
+                continue
+
             try:
-                self.num_recipes += crawler.crawl()
+                try:
+                    self.num_recipes += crawler.crawl()
+                except requests.exceptions.ReadTimeout as e:
+                    logger.info(f"Caught ReadTimeout exception: {e}")
+                    continue
             except AnchorListsEmptyError as e:
                 logger.info(f"E is: {e}")
                 logger.info(f"Terminating crawler for {crawler.base_url}")
@@ -182,8 +188,9 @@ class MultiCrawler:
             if SLOW_DEBUG is True:
                 logger.debug(f"self.num_recipes = {self.num_recipes}")
                 # Sleeps for 1 second, allow for the user to watch for the crawler messing up.
-                # This somewhat "throttles" how much bandwidth.  Would need more code to actually implement throttling.
-                sleep(1)
+                # This somewhat "throttles" how much bandwidth is needed.
+                #  Would need more code to actually implement throttling.
+                time.sleep(1)
 
     def results_dict(self) -> List[Dict]:
         """resulting singular list of dictionaries that represent schema-recipes"""
@@ -280,12 +287,24 @@ class Crawler:
 
         robots_txt_url = urllib.parse.urljoin(url, "robots.txt")
 
-        try:
-            robots = reppy.robots.Robots.fetch(robots_txt_url)
-        except reppy.exceptions.ConnectionExceptions as e:
-            raise RecipeCrawlerNetworkError(e)
-        self.agent = robots.agent("*")
-        logger.debug(f"Reading robots.txt at: {robots_txt_url}")
+        self.robots_txt = urllib.robotparser.RobotFileParser(robots_txt_url)
+        self.robots_txt.read()
+
+        self.crawl_delay = False
+
+        if self.robots_txt.crawl_delay(USER_AGENT_ROBOTS) is not None:
+            self.crawl_delay = True
+            self.crawl_delay_seconds: int = int(
+                self.robots_txt.crawl_delay(USER_AGENT_ROBOTS)
+            )
+            self.last_crawl = time.time()
+
+        if self.robots_txt.request_rate(USER_AGENT_ROBOTS) is not None:
+            raise NotImplementedError(
+                "Software does not support Request-rate in robots.txt file."
+            )
+
+        logger.debug(f"Read robots.txt at: {robots_txt_url}")
 
         self.urltest = URLTest(url)
 
@@ -316,7 +335,7 @@ class Crawler:
                     logger.debug(f"URL 1: {scrapings['url']}")
                     logger.debug(f"URL 2: {self.recipe_json[similar_idx]['url']}")
             else:  # for lists
-                raise NotImplemented(
+                raise NotImplementedError(
                     "Recipes websites currently don't have multiple recipes on one webpage, not sure of the implications."
                 )
                 num_recipes += len(scrapings)
@@ -357,6 +376,7 @@ class Crawler:
         returns a requests.Response object
         """
         # logger.debug("called _download_page()")
+        # TODO Why is this code being ignored?
         url = None
         while not url:
             # this picks a url
@@ -377,6 +397,10 @@ class Crawler:
 
         self.been_there_urls.append(url)
         logger.debug(f"Visiting {url}")
+
+        # set last_crawl time to now
+        if self.crawl_delay:
+            self.last_crawl = time.time()
 
         self.num_get_calls += 1
         resp = requests.get(url, headers=REQUESTS_HEADERS, timeout=5)
@@ -471,9 +495,7 @@ class Crawler:
             return (-4, url)
 
         # Check if robots.txt rules allow going to this URL
-        #        if self.robotparse.can_fetch(USER_AGENT_ROBOTS, url) is False:
-        #        if self.robotparse.can_fetch("*", url) is False:
-        if self.agent.allowed(url) is False:
+        if self.robots_txt.can_fetch(USER_AGENT_ROBOTS, url) is False:
             return (-5, url)
 
         if self._recipe_url != "" and url.startswith(self._recipe_url):
@@ -538,6 +560,14 @@ class Crawler:
 
         return md
 
+    def delay_crawl(self) -> bool:
+        """Should this crawl be delayed due to a time delay?"""
+
+        if self.crawl_delay is False:
+            return False
+
+        return (time.time() - self.last_crawl) < self.crawl_delay_seconds
+
 
 def load_website_sources_list(
     config_filename: str = "website_sources.yaml",
@@ -573,11 +603,13 @@ class RecipeScrapersCrawler(Crawler):
         elif "healthyeating.nhlbi.nih.gov" in url:
             self.ScraperDriver = recipe_scrapers.NIHHealthyEating
         else:
-            raise NotImplemented(f"Website '{url}' has not been implemented.")
+            raise NotImplementedError(f"Website '{url}' has not been implemented.")
 
         super().__init__(url, recipe_url, license, start_url, site_title)
 
-    def _scrape_page(self, response: requests.models.Response) -> Dict:
+    def _scrape_page(
+        self, response: requests.models.Response
+    ) -> Union[Dict[str, Any], None]:
         """
         scrapes a page
         input: response is a requests.models.Response object from requests.get()
@@ -585,18 +617,23 @@ class RecipeScrapersCrawler(Crawler):
         return dict or List, if it is empty it will be None
         """
         logger.debug("called RecipeScrapersCrawler._scrape_page()")
-        with StringIO(response.text) as fp:
-            # NOTE does recipe_scraper_obj need to be kept?
-            recipe_scraper_obj = self.ScraperDriver(fp)
 
-            dict = self._convert_recipe_scraper_to_schema_dict(
-                recipe_scraper_obj, response.url
-            )
-            return dict
+        # NOTE does recipe_scraper_obj need to be kept?
+        recipe_scraper_obj = self.ScraperDriver(url=response.url, html=response.text)
+
+        recipe_dict = self._convert_recipe_scraper_to_schema_dict(
+            recipe_scraper_obj, response.url
+        )
+        return recipe_dict
 
     # TODO: This function will need to be rewritten based on how exceptions work in recipe-scrapers versions after 13.3.0
-    def _convert_recipe_scraper_to_schema_dict(self, rs, url: str) -> Union[Dict, None]:
+    def _convert_recipe_scraper_to_schema_dict(
+        self,
+        rs: AbstractScraper,
+        url: str,
+    ) -> Union[Dict[str, Any], None]:
         """Convert recipe-scraper object into a recipe schema dictionary"""
+
         logger.debug("called _convert_recipe_scraper_to_schema_dict()")
         d = {}
 
@@ -620,7 +657,7 @@ class RecipeScrapersCrawler(Crawler):
                 d["totalTime"] = isodate.duration_isoformat(
                     timedelta(minutes=rs.total_time())
                 )
-        except (NotImplemented, ElementNotFoundInHtml):
+        except (NotImplementedError, ElementNotFoundInHtml):
             pass
 
         try:
@@ -651,7 +688,7 @@ class RecipeScrapersCrawler(Crawler):
 class URLTest:
     """Class of tests for URLs"""
 
-    def __init__(self, baseurl: str = None):
+    def __init__(self, baseurl: Union[str, None] = None):
         """baseurl is the start URL of the website"""
         self.baseurl = baseurl
         self.basesplit = None
@@ -735,6 +772,7 @@ class UserEmptyWebsiteListError(Exception):
 def main(sys_args: List = sys.argv[1:]) -> None:
     website_sources_list: List = []
 
+    # handle command line arguments
     parser = argparse.ArgumentParser(
         description="Recipe Crawler to that saves a cookbook to a JSON file."
     )
@@ -809,15 +847,20 @@ def main(sys_args: List = sys.argv[1:]) -> None:
     for source in website_sources_list:
         # logger.debug('KEYS: {}'.format(source['site'].keys()))
 
-        logger.debug(f"Adding crawler for: {source['site']['url']}")
-        mc.add_crawler(
-            source["site"]["url"],
-            source["site"].get("recipe_url"),
-            source["site"].get("license"),
-            # this is a URL the one that most-likely to get to recipes quickly, such as an index or landing pages for recipes.
-            source["site"].get("start_url"),
-            source["site"].get("title"),
-        )
+        try:
+            logger.debug(f"Adding crawler for: {source['site']['url']}")
+            mc.add_crawler(
+                source["site"]["url"],
+                source["site"].get("recipe_url"),
+                source["site"].get("license"),
+                # URL the one that most-likely to get to recipes quickly, such as an index or landing pages for recipes.
+                source["site"].get("start_url"),
+                source["site"].get("title"),
+            )
+        except NotImplementedError as e:
+            logger.debug(
+                f"Skipping crawler : '{source['site']['url']}' due to a NotImplementedError '{e}'"
+            )
 
     mc.run()
 
@@ -827,7 +870,7 @@ def main(sys_args: List = sys.argv[1:]) -> None:
     with open(args.output, "w") as fp:
         json.dump(recipes_dict, fp)
 
-    license_filename = f"license-{args.output[:-5]}.md"
+    license_filename = f"licenses-{args.output[:-5]}.md"
     with open(license_filename, "w") as fp:
         fp.write(mc.generate_license_report())
 
@@ -842,7 +885,7 @@ def main(sys_args: List = sys.argv[1:]) -> None:
     logger.info("  * Metric is not accurate.")
     runtime = pendulum.now().diff(start_time)
     # README.md row printer, INCOMPLETE
-#    logger.info(f"row:  | {__version__} | {args.limit} | | {mc.results_num_get_calls()} | | {mc.results_num_get_calls() / args.limit} | |")
+    #    logger.info(f"row:  | {__version__} | {args.limit} | | {mc.results_num_get_calls()} | | {mc.results_num_get_calls() / args.limit} | |")
     logger.info(f"Program's Runtime: {runtime.in_words()}")
 
 

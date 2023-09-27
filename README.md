@@ -81,10 +81,14 @@ OR Install the python libraries individually:
 * [Pendulum](https://pendulum.eustace.io/)
 * [PyYAML](https://pyyaml.org/)
 * [requests](https://docs.python-requests.org/)
-* [reppy](https://github.com/seomoz/reppy)
 * [recipe-scrapers](https://github.com/hhursev/recipe-scrapers)
 * [scrape-schema-recipe](https://github.com/micahcochran/scrape-schema-recipe)
 
+
+For development, install the dependent libaries typing:
+```
+> pip install -r requirements-dev.txt
+```
 ### Optional Dependency
 If you want to download pages using [Brotli compression](https://en.wikipedia.org/wiki/Brotli)
 * ensure requests >= 2.26.0 is installed, in order to check your request version (two ways)
